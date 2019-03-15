@@ -1,0 +1,12 @@
+[package]
+name = "markings"
+version = "0.1.0"
+authors = ["museun <museun@outlook.com>"]
+repository = "https://github.com/museun/markings"
+edition = "2018"
+license = "0BSD"
+keywords = ["template"]
+
+[dependencies.hashbrown]
+version = "0.1.8"
+optional = true
