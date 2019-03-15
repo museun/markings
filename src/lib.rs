@@ -90,7 +90,6 @@ impl Template {
     pub fn apply<'repr, I, V>(mut self, parts: I) -> Result<String, Error>
     where
         I: IntoIterator<Item = &'repr (&'repr str, V)> + 'repr,
-        I::IntoIter: DoubleEndedIterator,
         V: std::fmt::Display + 'repr,
     {
         let parts = parts
