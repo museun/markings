@@ -55,6 +55,61 @@ pub struct Template {
 }
 
 impl Template {
+    /// Find all of the keys in the template, returning their names
+    ///
+    /// This will return an error on:
+    /// * Duplicate keys
+    /// * Unsupported templates (e.g. nested)
+    /// * Empty Templates (so you can skip parsing/application)
+    /// * Failure of the `x` cmp function
+    /// * Failure of the `xs` cmp function
+    ///
+    /// See [`KeyError`](./enum.KeyError.html) for errors this can return
+    ///
+    /// `x` is a comparison function that is applied to the first character of each key
+    ///
+    /// `xs` is a comparison function that is applied to the rest of the key
+    pub fn find_keys(
+        input: &str,
+        x: fn(&char) -> bool,
+        xs: fn(&char) -> bool,
+    ) -> Result<Vec<&str>, KeyError<'_>> {
+        let mut set = Vec::new();
+        let mut start = None;
+        let mut iter = input.char_indices().peekable();
+        loop {
+            match (iter.next(), iter.peek(), start) {
+                (Some((i, '$')), Some((_, '{')), None) => {
+                    start.replace(i);
+                }
+                (Some((_, '$')), Some((_, '{')), Some(s)) => {
+                    return Err(KeyError::NotSupported("nested templates", s..=input.len()));
+                }
+                (Some((i, '}')), _, Some(s)) => {
+                    let t = input[s + 2..i].trim();
+                    if t.is_empty() {
+                        return Err(KeyError::EmptyTemplate(s..=i));
+                    }
+                    if !t.chars().next().as_ref().map(x).unwrap() {
+                        return Err(KeyError::InvalidKeyStart(t, s..=i));
+                    }
+                    if !t.chars().all(|c| xs(&c)) {
+                        return Err(KeyError::InvalidKey(t, s..=i));
+                    }
+                    if set.contains(&t) {
+                        return Err(KeyError::DuplicateKey(t, s..=i));
+                    }
+                    set.push(t);
+                    start.take();
+                }
+                (Some((_, ..)), ..) => continue,
+                (None, ..) => break,
+            }
+        }
+
+        Ok(set)
+    }
+
     /// Parses a new template from a string
     ///
     /// The syntax is extremely basic: just `${key}`
@@ -186,6 +241,45 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+#[derive(Debug, PartialEq)]
+pub enum KeyError<'a> {
+    NotSupported(&'a str, RangeInclusive<usize>),
+    EmptyTemplate(RangeInclusive<usize>),
+    InvalidKeyStart(&'a str, RangeInclusive<usize>),
+    InvalidKey(&'a str, RangeInclusive<usize>),
+    DuplicateKey(&'a str, RangeInclusive<usize>),
+}
+
+impl<'a> std::fmt::Display for KeyError<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use KeyError::*;
+        match self {
+            NotSupported(msg, range) => {
+                write!(f, "not supported: {} at pos: {:?}", msg, range)?;
+            }
+            EmptyTemplate(range) => {
+                write!(f, "empty template at pos: {:?}", range)?;
+            }
+            InvalidKeyStart(name, range) => {
+                write!(
+                    f,
+                    "invalid name `{}` must start with A-Za-z at pos: {:?}",
+                    name, range
+                )?;
+            }
+            InvalidKey(name, range) => {
+                write!(f, "invalid name: `{}` at pos: {:?}", name, range)?;
+            }
+            DuplicateKey(name, range) => {
+                write!(f, "duplicate name: `{}` at pos: {:?}", name, range)?;
+            }
+        };
+        Ok(())
+    }
+}
+
+impl<'a> std::error::Error for KeyError<'a> {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +368,42 @@ mod tests {
                         the failures.";
 
         assert_eq!(t.apply(&parts).unwrap(), expected);
+    }
+
+    #[test]
+    fn find_keys() {
+        let input = "${test} ${foo} ${bar}";
+        let list =
+            Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
+                .unwrap();
+        assert_eq!(list, vec!["test", "foo", "bar"]);
+
+        let input = "${a} ${b} ${b}";
+        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
+            .unwrap_err();
+        assert_eq!(err, KeyError::DuplicateKey("b", 10..=13));
+
+        let input = "${a} ${} ${b}";
+        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
+            .unwrap_err();
+        assert_eq!(err, KeyError::EmptyTemplate(5..=7));
+
+        let input = "${a} ${${asdf}}";
+        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
+            .unwrap_err();
+        assert_eq!(
+            err,
+            KeyError::NotSupported("nested templates", 5..=input.len())
+        );
+
+        let input = "${good} ${_bad}";
+        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
+            .unwrap_err();
+        assert_eq!(err, KeyError::InvalidKeyStart("_bad", 8..=14));
+
+        let input = "${good} ${b_ad}";
+        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
+            .unwrap_err();
+        assert_eq!(err, KeyError::InvalidKey("b_ad", 8..=14));
     }
 }
