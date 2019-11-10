@@ -1,13 +1,9 @@
 [package]
 name = "markings"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["museun <museun@outlook.com>"]
 description = "a very simple string (template) replacement crate"
 repository = "https://github.com/museun/markings"
 edition = "2018"
 license = "0BSD"
 keywords = ["template"]
-
-[dependencies.hashbrown]
-version = "0.1.8"
-optional = true
