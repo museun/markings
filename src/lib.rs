@@ -49,6 +49,7 @@ pub struct Template {
     data: String,                 // total string
     left: String,                 // left most part
     index: RangeInclusive<usize>, // index of left most part
+    is_identity: bool, // whether this template is just an identity template (e.g. a no-op)
 }
 
 impl Template {
@@ -107,6 +108,10 @@ impl Template {
         Ok(set)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.is_identity
+    }
+
     /// Parses a new template from a string
     ///
     /// The syntax is extremely basic: just `${key}`
@@ -126,13 +131,20 @@ impl Template {
                     left: input[n + 2..i].into(),
                     index: RangeInclusive::new(n, i),
                     data: input.into(),
+                    is_identity: false,
                 });
             }
         }
 
         match start {
             Some(n) => Err(Error::Unbalanced(n)),
-            None => Err(Error::EmptyTemplate),
+            // no template was found, so this is an "identity" template
+            None => Ok(Self {
+                left: "".into(),
+                data: input.into(),
+                index: RangeInclusive::new(0, input.len()),
+                is_identity: true,
+            }),
         }
     }
 
@@ -144,6 +156,11 @@ impl Template {
         I: IntoIterator<Item = &'repr (&'repr str, V)> + 'repr,
         V: std::fmt::Display + 'repr,
     {
+        // don't bother apply args and return the input string
+        if self.is_identity {
+            return Ok(self.data);
+        }
+
         let parts = parts
             .into_iter()
             .map(|(k, v)| (k, v.to_string()))
@@ -365,6 +382,15 @@ mod tests {
                         the failures.";
 
         assert_eq!(t.apply(&parts).unwrap(), expected);
+    }
+
+    #[test]
+    fn identity_string() {
+        let input = "foobar baz quux {{something}}";
+        let template = Template::parse(&input).unwrap();
+        assert!(template.is_empty());
+        let parts = Args::new().build();
+        assert_eq!(input, template.apply(&parts).unwrap());
     }
 
     #[test]
