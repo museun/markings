@@ -183,7 +183,6 @@ impl Template {
             }
 
             let this = match Self::parse(&self.data) {
-                Err(Error::EmptyTemplate) => break,
                 Err(err) => return Err(err),
                 Ok(this) => this,
             };
@@ -238,8 +237,6 @@ impl<'a> Args<'a> {
 /// Errors returned by the Template parser/applier
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    /// The template is empty
-    EmptyTemplate,
     /// Unbalanced at `pos`: every ${ needs to be paired with a }
     Unbalanced(usize),
     /// The `key` is missing
@@ -249,7 +246,6 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::EmptyTemplate => write!(f, "template contains no replacement strings"),
             Error::Unbalanced(start) => write!(f, "unbalanced bracket starting at: {}", start),
             Error::Missing(key) => write!(f, "template key '{}' is missing", key),
         }
@@ -271,27 +267,18 @@ impl<'a> std::fmt::Display for KeyError<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use KeyError::*;
         match self {
-            NotSupported(msg, range) => {
-                write!(f, "not supported: {} at pos: {:?}", msg, range)?;
-            }
-            EmptyTemplate(range) => {
-                write!(f, "empty template at pos: {:?}", range)?;
-            }
-            InvalidKeyStart(name, range) => {
-                write!(
-                    f,
-                    "invalid name `{}` must start with A-Za-z at pos: {:?}",
-                    name, range
-                )?;
-            }
-            InvalidKey(name, range) => {
-                write!(f, "invalid name: `{}` at pos: {:?}", name, range)?;
-            }
+            NotSupported(msg, range) => write!(f, "not supported: {} at pos: {:?}", msg, range),
+            EmptyTemplate(range) => write!(f, "empty template at pos: {:?}", range),
+            InvalidKeyStart(name, range) => write!(
+                f,
+                "invalid name `{}` must start with A-Za-z at pos: {:?}",
+                name, range
+            ),
+            InvalidKey(name, range) => write!(f, "invalid name: `{}` at pos: {:?}", name, range),
             DuplicateKey(name, range) => {
-                write!(f, "duplicate name: `{}` at pos: {:?}", name, range)?;
+                write!(f, "duplicate name: `{}` at pos: {:?}", name, range)
             }
-        };
-        Ok(())
+        }
     }
 }
 
