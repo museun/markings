@@ -1,3 +1,27 @@
+//! # Simple usage
+//! ```
+//! # fn main() {
+//! use markings::{Args, Template};
+//!
+//! let input = "hello ${name}, an answer: ${greeting}.";
+//! let template = Template::parse(&input).unwrap();
+//! // this allows you to determine if a template has replacement args
+//! // an empty template, when apply with any args will just return the input string
+//! // template.is_empty()
+//! let args = Args::new()
+//!      // with constructs a key:val pair,
+//!      // key must be a &str,
+//!      // value is anything that implements std::fmt::Display
+//!     .with("name", &"test-user")
+//!     .with("greeting", &false)
+//!     .build(); //construct the args
+//!
+//! // apply the pre-computed args to the template, consuming the template
+//! let output = template.apply(&args).unwrap();
+//! assert_eq!(output, "hello test-user, an answer: false.");
+//! # }
+//! ```
+//!
 //! ```
 //! # fn main() {
 //! use markings::{Args, Template};
@@ -10,10 +34,10 @@
 //!     }
 //! }
 //!
-//! let test = Foo{thing: "test"};
+//! let test = Foo{ thing: "test" };
 //! let test = Args::new().with("thing", &test).with("end", &"!").build();
 //!
-//! let demo = Foo{thing: "demo_"};
+//! let demo = Foo{ thing: "demo_" };
 //! let demo = Args::new().with("thing", &demo).with("end", &42).build();
 //!
 //! let input = "this is a ${thing}${end}";
