@@ -108,6 +108,9 @@ impl Template {
         Ok(set)
     }
 
+    /// Returns whether a template was found in the input string
+    ///
+    /// If this is true, then [`Template::apply`](./struct.Template.html#method.apply) will just return the input passed into [`Template::parse`](./struct.Template.html#method.parse)
     pub fn is_empty(&self) -> bool {
         self.is_identity
     }
