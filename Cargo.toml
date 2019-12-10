@@ -1,9 +1,14 @@
 [package]
 name = "markings"
-version = "0.3.0"
+version = "0.3.1"
+
 authors = ["museun <museun@outlook.com>"]
 description = "a very simple string (template) replacement crate"
 repository = "https://github.com/museun/markings"
-edition = "2018"
+documentation = "https://docs.rs/markings"
+readme = "README.md"
+
 license = "0BSD"
 keywords = ["template"]
+
+edition = "2018"

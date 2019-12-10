@@ -1,6 +1,6 @@
 # markings
 
-[![Cargo](https://img.shields.io/crates/v/markings.svg)](https://crates.io/crates/markings)
+[![Cargo](https://img.shields.io/crates/v/markings.svg)](https://crates.io/crates/markings) [![Docs.rs](https://docs.rs/markings/badge.svg)](https://docs.rs/markings) [![Github Actions](https://github.com/museun/markings/workflows/Rust/badge.svg)](https://github.com/museun/markings) 
 
 ## Simple usage
 ```rust
