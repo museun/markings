@@ -1,33 +1,28 @@
 # markings
-a extremely simple template "language"
 
-optional features: "hashbrown" to enable faster hashmaps with lower allocation counts
-
-usage:
+## Simple usage
 ```rust
-use markings::{Args, Template};
-struct Foo<'a> { data: &'a str }
-impl<'a> std::fmt::Display for Foo<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.data)
-    }
-}
+use markings::{Args, Template, Opts};
+// template strings are simply just ${key} markers in a string
+// they are replaced with a cooresponding value when .apply() is used
+let input = "hello ${name}, an answer: ${greeting}.";
 
-#[derive(Debug)]
-struct Bar { ch: u8 }
+// parse a template with the default options
+// templates are clonable, they are 'consumed' on application.
+let template = Template::parse(&input, Opts::default()).unwrap();
 
-let foo = Foo { data: "template" };
-let bar = format!("{}", Bar { ch: b'!' }.ch as char);
-let uses = format!("{:#X} uses", 42 + 7);
-
-let input = "this is a ${string} with ${replacements}${end}";
-let template = Template::parse(&input).expect("well formed template");
+// construct some replacement args, this is reusable
 let args = Args::new()
-    .with("string", &foo)
-    .with("replacements", &uses)
-    .with("end", &bar)
-    .build();
-let output = template.apply(&args).expect("args should be correct");
+     // with constructs a key:val pair,
+     // key must be a &str,
+     // value is anything that implements std::fmt::Display
+    .with("name", &"test-user")
+    .with("greeting", &false)
+    .build(); // construct the args
 
-println!("{}", output); // => "this is a template with 0x31 uses!"
+// apply the pre-computed args to the template, consuming the template
+let output = template.apply(&args).unwrap();
+assert_eq!(output, "hello test-user, an answer: false.");
 ```
+
+License: 0BSD
