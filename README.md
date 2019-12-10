@@ -1,5 +1,7 @@
 # markings
 
+[![Cargo](https://img.shields.io/crates/v/markings.svg)](https://crates.io/crates/markings)
+
 ## Simple usage
 ```rust
 use markings::{Args, Template, Opts};
