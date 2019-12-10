@@ -1,178 +1,173 @@
 //! # Simple usage
 //! ```
-//! # fn main() {
-//! use markings::{Args, Template};
-//!
+//! use markings::{Args, Template, Opts};
+//! // template strings are simply just ${key} markers in a string
+//! // they are replaced with a cooresponding value when .apply() is used
 //! let input = "hello ${name}, an answer: ${greeting}.";
-//! let template = Template::parse(&input).unwrap();
-//! // this allows you to determine if a template has replacement args
-//! // an empty template, when apply with any args will just return the input string
-//! // template.is_empty()
+//!
+//! // parse a template with the default options
+//! // templates are clonable, they are 'consumed' on application.
+//! let template = Template::parse(&input, Opts::default()).unwrap();
+//!
+//! // construct some replacement args, this is reusable
 //! let args = Args::new()
 //!      // with constructs a key:val pair,
 //!      // key must be a &str,
 //!      // value is anything that implements std::fmt::Display
 //!     .with("name", &"test-user")
 //!     .with("greeting", &false)
-//!     .build(); //construct the args
+//!     .build(); // construct the args
 //!
 //! // apply the pre-computed args to the template, consuming the template
 //! let output = template.apply(&args).unwrap();
 //! assert_eq!(output, "hello test-user, an answer: false.");
-//! # }
-//! ```
-//!
-//! ```
-//! # fn main() {
-//! use markings::{Args, Template};
-//! struct Foo<'a> {
-//!     thing: &'a str,
-//! }
-//! impl<'a> std::fmt::Display for Foo<'a> {
-//!     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//!         write!(f, "{}", self.thing)
-//!     }
-//! }
-//!
-//! let test = Foo{ thing: "test" };
-//! let test = Args::new().with("thing", &test).with("end", &"!").build();
-//!
-//! let demo = Foo{ thing: "demo_" };
-//! let demo = Args::new().with("thing", &demo).with("end", &42).build();
-//!
-//! let input = "this is a ${thing}${end}";
-//! let template = Template::parse(&input).unwrap();
-//!
-//! let output = template.clone().apply(&test).unwrap();
-//! assert_eq!(output, "this is a test!");
-//!
-//! let output = template.clone().apply(&demo).unwrap();
-//! assert_eq!(output, "this is a demo_42");
-//! # }
 //! ```
 
 use std::collections::HashMap;
-use std::ops::RangeInclusive;
 
-/// Template allows for string replacement by name
-///
-/// ```
-/// # use markings::{Template, Args};
-///
-/// let world = "world";
-/// let message = Template::parse("hello, ${world}!")
-///     .unwrap()
-///     .apply(&Args::new().with("world", &world).build())
-///     .unwrap();
-/// println!("{}", message); // => hello, world!
-///
-/// # assert_eq!(message, "hello, world!");
-/// ```
-#[derive(Clone, Debug)]
-pub struct Template {
-    data: String,                 // total string
-    left: String,                 // left most part
-    index: RangeInclusive<usize>, // index of left most part
-    is_identity: bool, // whether this template is just an identity template (e.g. a no-op)
+/// An error produced by this crate
+#[derive(Debug)]
+pub enum Error {
+    /// Mismatched braces were found
+    ///
+    /// `open` count and `closed` count
+    MismatchedBraces { open: usize, close: usize },
+
+    /// Expected a closing brace for open brace
+    ///
+    /// `head` is the offset for the nearest open brace
+    ExpectedClosing { head: usize },
+
+    /// Expected a opening brace for close brace
+    ///
+    /// `tail` is the offset for the nearest close brace
+    ExpectedOpening { tail: usize },
+
+    /// Nested template was found
+    ///
+    /// `pos` is where the template begins
+    NestedTemplate { pos: usize },
+
+    /// Duplicate keys were found, but not configured in [`Opts`](./struct.Opts.html)
+    DuplicateKeys,
+
+    /// An empty template was found, but not configured in [`Opts`](./struct.Opts.html)
+    EmptyTemplate,
+
+    /// Optional keys were found, but not configured in [`Opts`](./struct.Opts.html)
+    OptionalKeys,
 }
 
-impl Template {
-    /// Find all of the keys in the template, returning their names
-    ///
-    /// This will return an error on:
-    /// * Duplicate keys
-    /// * Unsupported templates (e.g. nested)
-    /// * Empty Templates (so you can skip parsing/application)
-    /// * Failure of the `x` cmp function
-    /// * Failure of the `xs` cmp function
-    ///
-    /// See [`KeyError`](./enum.KeyError.html) for errors this can return
-    ///
-    /// `x` is a comparison function that is applied to the first character of each key
-    ///
-    /// `xs` is a comparison function that is applied to the rest of the key
-    pub fn find_keys(
-        input: &str,
-        x: fn(&char) -> bool,
-        xs: fn(&char) -> bool,
-    ) -> Result<Vec<&str>, KeyError<'_>> {
-        let mut set = Vec::new();
-        let mut start = None;
-        let mut iter = input.char_indices().peekable();
-        loop {
-            match (iter.next(), iter.peek(), start) {
-                (Some((i, '$')), Some((_, '{')), None) => {
-                    start.replace(i);
-                }
-                (Some((_, '$')), Some((_, '{')), Some(s)) => {
-                    return Err(KeyError::NotSupported("nested templates", s..=input.len()));
-                }
-                (Some((i, '}')), _, Some(s)) => {
-                    let t = input[s + 2..i].trim();
-                    if t.is_empty() {
-                        return Err(KeyError::EmptyTemplate(s..=i));
-                    }
-                    if !t.chars().next().as_ref().map(x).unwrap() {
-                        return Err(KeyError::InvalidKeyStart(t, s..=i));
-                    }
-                    if !t.chars().all(|c| xs(&c)) {
-                        return Err(KeyError::InvalidKey(t, s..=i));
-                    }
-                    if set.contains(&t) {
-                        return Err(KeyError::DuplicateKey(t, s..=i));
-                    }
-                    set.push(t);
-                    start.take();
-                }
-                (Some((_, ..)), ..) => continue,
-                (None, ..) => break,
-            }
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Error::*;
+        match self {
+            MismatchedBraces { open, close } => write!(
+                f,
+                "found {} open braces, and {} closed braces. a mistmatch",
+                open, close
+            ),
+            ExpectedClosing { head } => write!(f, "expected closing bracket from offset {}", head),
+            ExpectedOpening { tail } => write!(f, "expected opening bracket from offset {}", tail),
+            NestedTemplate { pos } => write!(f, "nested template starting at offset: {}", pos),
+            DuplicateKeys => f.write_str("duplicate keys were found"),
+            EmptyTemplate => f.write_str("empty template was found"),
+            OptionalKeys => f.write_str("optional keys were found"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct State<'a> {
+    keys: Vec<&'a str>,
+}
+
+impl<'a> State<'a> {
+    fn new(keys: Vec<&'a str>) -> Self {
+        Self { keys }
+    }
+
+    fn has_keys(&self) -> bool {
+        !self.keys.is_empty()
+    }
+
+    fn remove(&mut self, key: &str) -> Option<(&'a str, usize)> {
+        if self.keys.is_empty() {
+            return None;
         }
 
-        Ok(set)
+        let mut out = None;
+        let mut i = 0;
+        while i != self.keys.len() {
+            if self.keys[i] == key {
+                let s = self.keys.remove(i);
+                let (_, count) = out.get_or_insert_with(|| (s, 0));
+                *count += 1;
+            } else {
+                i += 1;
+            }
+        }
+        out
     }
 
-    /// Returns whether a template was found in the input string
-    ///
-    /// If this is true, then [`Template::apply`](./struct.Template.html#method.apply) will just return the input passed into [`Template::parse`](./struct.Template.html#method.parse)
-    pub fn is_empty(&self) -> bool {
-        self.is_identity
+    fn has_duplicates(&self) -> bool {
+        let mut set = std::collections::HashSet::new();
+        self.keys.iter().any(|key| !set.insert(key))
     }
+}
 
+/// Templates allows for string replacement by **name**
+///
+/// ```
+/// use markings::{Template, Args, Opts};
+/// // parse a template using the default options
+/// // the template is clonable so you don't have to reparse it
+/// let template = Template::parse("hello, ${world}${end}", Opts::default())
+///     .unwrap();
+///
+/// // build re-usable args that act as the replacements for the keys in the template
+/// let args = Args::new()
+///     .with("world", &"world")
+///     .with("end", &(0x21 as char))
+///     .build();
+///
+/// // apply the args to the template, consuming the template
+/// let template = template
+///     .apply(&args)
+///     .unwrap();
+///
+/// // you'll get a String out, hopefully, that has your new message
+/// assert_eq!(template, "hello, world!");
+/// ```
+/// See [`Template::apply`](./fn.Template.apply.html) for applying arguments to this template.
+///
+/// See [`Opts`](./struct.Opts.html) for a way to change the behavior of the parser
+#[derive(Clone, Debug)]
+pub struct Template<'a> {
+    data: String, // total string
+    state: State<'a>,
+    opts: Opts,
+}
+
+impl<'a> Template<'a> {
     /// Parses a new template from a string
     ///
     /// The syntax is extremely basic: just `${key}`
     ///
-    /// It gets replaced by a value matching the key during the [`Template::apply`](./struct.Template.html#method.apply) call
-    pub fn parse(input: &str) -> Result<Self, Error> {
-        let mut iter = input.char_indices().peekable();
+    /// The *key* gets replaced by a *value* matching it during the [`Template::apply`](./struct.Template.html#method.apply) call
+    pub fn parse(input: &'a str, opts: Opts) -> Result<Self, Error> {
+        let state = State::new(Self::find_keys(input)?);
+        opts.validate(&state)?;
+        Ok(Self {
+            data: input.to_string(),
+            state,
+            opts,
+        })
+    }
 
-        let mut start = None;
-        while let Some((i, ch)) = iter.next() {
-            // TODO: this doesn't balance the brackets.. oops
-            if let ('$', Some((_, '{'))) = (ch, iter.peek()) {
-                start.replace(i);
-            }
-            if let ('}', Some(n)) = (ch, start) {
-                return Ok(Self {
-                    left: input[n + 2..i].into(),
-                    index: RangeInclusive::new(n, i),
-                    data: input.into(),
-                    is_identity: false,
-                });
-            }
-        }
-
-        match start {
-            Some(n) => Err(Error::Unbalanced(n)),
-            // no template was found, so this is an "identity" template
-            None => Ok(Self {
-                left: "".into(),
-                data: input.into(),
-                index: RangeInclusive::new(0, input.len()),
-                is_identity: true,
-            }),
-        }
+    /// Was this template empty?
+    pub fn is_empty(&self) -> bool {
+        self.opts.empty_template
     }
 
     /// Apply the arguments to the template
@@ -180,70 +175,193 @@ impl Template {
     /// One can use the [`Args`](./struct.Args.html) builder to make this less tedious
     pub fn apply<'repr, I, V>(mut self, parts: I) -> Result<String, Error>
     where
+        // NOTE: these lifetimes could be more coarse
         I: IntoIterator<Item = &'repr (&'repr str, V)> + 'repr,
         V: std::fmt::Display + 'repr,
     {
-        // don't bother apply args and return the input string
-        if self.is_identity {
+        // if we have an empty template, ignore formatting
+        if self.is_empty() {
             return Ok(self.data);
         }
 
-        let parts = parts
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
-            .collect::<HashMap<_, _>>(); // this order doesn't matter
-
-        debug_assert!(!parts.is_empty());
-
-        let mut seen = 0;
-        while seen < parts.len() {
-            let part = match parts.get(&self.left.as_str()) {
-                Some(part) => part,
-                None => return Err(Error::Missing(self.left)),
-            };
-            self.data.replace_range(self.index.clone(), &part);
-            if seen == parts.len() - 1 {
-                break;
+        let parts = parts.into_iter().map(|(k, v)| (k, v.to_string()));
+        for (key, val) in parts {
+            let matches = self.state.remove(key); // is this the infinite loop?
+            match matches {
+                Some((match_, _)) => {
+                    let s = self.data.replace(&format!("${{{}}}", match_), &val);
+                    std::mem::replace(&mut self.data, s);
+                }
+                None if self.opts.optional_keys => continue,
+                _ => return Err(Error::OptionalKeys),
             }
-
-            let this = match Self::parse(&self.data) {
-                Err(err) => return Err(err),
-                Ok(this) => this,
-            };
-            std::mem::replace(&mut self, this);
-            seen += 1;
         }
 
-        let mut data = self.data.to_string();
-        data.shrink_to_fit();
-        Ok(data)
+        self.data.shrink_to_fit();
+        Ok(self.data)
+    }
+
+    /// Find all the *keys* in the input string, returning them in a Vec
+    ///
+    /// This is exposed as a convenient function for doing pre-parsing.
+    ///
+    /// This returns an error if there are:
+    /// * nested templates
+    /// * mismatched braces
+    ///
+    /// ```
+    /// # use markings::Template;
+    /// let keys = Template::find_keys("${this} is a ${test} ${with some keys}").unwrap();
+    /// assert_eq!(keys, vec!["this", "test", "with some keys"]);
+    /// ```
+    pub fn find_keys(input: &str) -> Result<Vec<&str>, Error> {
+        let mut heads = vec![];
+        let mut tails = vec![];
+
+        let mut last = None;
+        let mut iter = input.char_indices().peekable();
+        while let Some((pos, ch)) = iter.next() {
+            if ch == '$' && iter.peek().map(|&(_, d)| d == '{').unwrap_or_default() {
+                last.replace(pos);
+                heads.push(pos);
+                iter.next();
+            }
+            if ch == '{' && last.is_some() {
+                return Err(Error::NestedTemplate { pos });
+            }
+
+            if ch == '}' && last.is_some() {
+                tails.push(pos);
+                last.take();
+            }
+        }
+
+        if heads.len() != tails.len() {
+            return Err(Error::MismatchedBraces {
+                open: heads.len(),
+                close: tails.len(),
+            });
+        }
+
+        tails.reverse();
+
+        let mut keys = Vec::with_capacity(heads.len());
+        for head in heads {
+            let tail = tails.pop().ok_or_else(|| Error::ExpectedClosing { head })?;
+            if tail > head {
+                keys.push(&input[head + 2..tail]);
+            } else {
+                return Err(Error::ExpectedOpening { tail });
+            }
+        }
+
+        if !tails.is_empty() {
+            return Err(Error::MismatchedBraces {
+                open: 0,
+                close: tails.len(),
+            });
+        }
+
+        Ok(keys)
     }
 }
 
-/// This allows you to be args for the [`Template::apply`](./struct.Template.html#method.apply) method
+/// `Opts` are a set of options to configure how a template will be **parsed** and **applied**
 ///
+/// ### The default options would fail if
+/// - there is an empty template (e.g. no replacement keys)
+/// - there are duplicate keys
+/// - apply will fail if the exact keys aren't applied
+///
+/// ## default options
+/// ```
+/// # use markings::{Template, Opts};
+/// let input = "this is a ${name}.";
+/// let template = Template::parse(&input, Opts::default()).unwrap();
+/// ```
+/// ## various options
+/// ```
+/// # use markings::{Template, Opts};
+/// // this will allow these options in the parsing/application
+/// let opts = Opts::default()
+///     .optional_keys()  // optional keys -- args aren't required to match the template keys
+///     .duplicate_keys() // duplicate keys -- duplicate keys in the template will use the same argument
+///     .empty_template() // templates can just be strings that act as an "identity"
+///     .build();
+///
+/// let input = "this is a ${name}.";
+/// let template = Template::parse(&input, opts).unwrap();
+#[derive(Default, Copy, Clone, Debug, PartialEq)]
+pub struct Opts {
+    optional_keys: bool,
+    duplicate_keys: bool,
+    empty_template: bool,
+}
+
+impl Opts {
+    /// Allow optional keys
+    ///
+    /// Keys found in the template application don't have to appear in the template
+    pub fn optional_keys(&mut self) -> &mut Self {
+        self.optional_keys = !self.optional_keys;
+        self
+    }
+
+    /// Allow duplicate keys
+    ///
+    /// Multiple keys in the template will be replaced by the same argument
+    pub fn duplicate_keys(&mut self) -> &mut Self {
+        self.duplicate_keys = !self.duplicate_keys;
+        self
+    }
+
+    /// Allows for an empty template -- e.g. a template without any args
+    ///
+    /// When args are applied to this, the original string is returned
+    pub fn empty_template(&mut self) -> &mut Self {
+        self.empty_template = !self.empty_template;
+        self
+    }
+
+    /// Construct the option set
+    pub fn build(self) -> Self {
+        self
+    }
+
+    fn validate(self, keys: &State<'_>) -> Result<(), Error> {
+        if !self.empty_template && !keys.has_keys() {
+            return Err(Error::EmptyTemplate);
+        }
+        if !self.duplicate_keys && keys.has_duplicates() {
+            return Err(Error::DuplicateKeys);
+        }
+        Ok(())
+    }
+}
+
+/// This is an easy way to build an argument mapping for the [`template application`](./struct.Template.html#method.apply) method
+///
+/// The *key* must be a [`&str`](https://doc.rust-lang.org/std/primitive.str.html) while the *value* can be any [`std::fmt::Display`](https://doc.rust-lang.org/std/path/struct.Display.html) trait object
+///
+/// **note** The keys are unique, duplicates will be replaced by the last one
 /// ```
 /// # use markings::Args;
 /// let args = Args::new()
-///                 .with("key1", &false)
-///                 .with("key2", &"message")
-///                 .with("key3", &42)
-///                 .build();
+///     .with("key1", &false)
+///     .with("key2", &"message")
+///     .with("key3", &41)
+///     .with("key3", &42)
+///     .build();
 /// # assert_eq!(args.len(), 3)
 /// ```
 pub struct Args<'a>(HashMap<&'a str, &'a dyn std::fmt::Display>);
 
-impl<'a> Default for Args<'a> {
-    /// Create a new Args builder
-    fn default() -> Self {
-        Self(HashMap::new())
-    }
-}
-
 impl<'a> Args<'a> {
     /// Create a new Args builder
+    // default will be confusing because apply requires a dyn trait
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self::default()
+        Self(HashMap::new())
     }
 
     /// Maps a key to a type that implements [`std::fmt::Display`](https://doc.rust-lang.org/std/fmt/trait.Display.html)
@@ -258,62 +376,37 @@ impl<'a> Args<'a> {
     }
 }
 
-/// Errors returned by the Template parser/applier
-#[derive(Debug, PartialEq)]
-pub enum Error {
-    /// Unbalanced at `pos`: every ${ needs to be paired with a }
-    Unbalanced(usize),
-    /// The `key` is missing
-    Missing(String),
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Unbalanced(start) => write!(f, "unbalanced bracket starting at: {}", start),
-            Error::Missing(key) => write!(f, "template key '{}' is missing", key),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-#[derive(Debug, PartialEq)]
-pub enum KeyError<'a> {
-    NotSupported(&'a str, RangeInclusive<usize>),
-    EmptyTemplate(RangeInclusive<usize>),
-    InvalidKeyStart(&'a str, RangeInclusive<usize>),
-    InvalidKey(&'a str, RangeInclusive<usize>),
-    DuplicateKey(&'a str, RangeInclusive<usize>),
-}
-
-impl<'a> std::fmt::Display for KeyError<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use KeyError::*;
-        match self {
-            NotSupported(msg, range) => write!(f, "not supported: {} at pos: {:?}", msg, range),
-            EmptyTemplate(range) => write!(f, "empty template at pos: {:?}", range),
-            InvalidKeyStart(name, range) => write!(
-                f,
-                "invalid name `{}` must start with A-Za-z at pos: {:?}",
-                name, range
-            ),
-            InvalidKey(name, range) => write!(f, "invalid name: `{}` at pos: {:?}", name, range),
-            DuplicateKey(name, range) => {
-                write!(f, "duplicate name: `{}` at pos: {:?}", name, range)
-            }
-        }
-    }
-}
-
-impl<'a> std::error::Error for KeyError<'a> {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duplicate_key() {
+        let args = Args::new()
+            .with("a", &true)
+            .with("a", &false)
+            .with("a", &true)
+            .build();
+
+        let v = args
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(v, vec![("a", "true".to_string())]);
+    }
+
+    #[test]
+    fn duplicates() {
+        let state = State::new(vec!["a", "b", "c"]);
+        assert!(!state.has_duplicates());
+
+        let state = State::new(vec!["a", "b", "a", "c"]);
+        assert!(state.has_duplicates());
+    }
+
     #[test]
     fn basic() {
-        let p = Template::parse("${a} ${b}${c}").unwrap();
+        let p = Template::parse("${a} ${b}${c}", Default::default()).unwrap();
         let t = p.apply(&[("a", &0), ("b", &1), ("c", &2)]).unwrap();
         assert_eq!(t, "0 12");
     }
@@ -326,7 +419,7 @@ mod tests {
             .join(" ");
 
         for c in b'a'..=b'z' {
-            let t = Template::parse(&base).unwrap();
+            let t = Template::parse(&base, Default::default()).unwrap();
             base = t
                 .apply(&[(
                     format!("{}", c as char).as_ref(),
@@ -353,7 +446,7 @@ mod tests {
                         'collected' ${overall_total} credits from all of \
                         the failures.";
 
-        let t = Template::parse(&template).unwrap();
+        let t = Template::parse(&template, Default::default()).unwrap();
         let out = t
             .apply(&[
                 ("max", &"218,731"),
@@ -380,7 +473,7 @@ mod tests {
                         'collected' ${overall_total} credits from all of \
                         the failures.";
 
-        let t = Template::parse(&template).unwrap();
+        let t = Template::parse(&template, Default::default()).unwrap();
         let parts = Args::new()
             .with("max", &"218,731")
             .with("total", &"706,917")
@@ -399,48 +492,46 @@ mod tests {
     }
 
     #[test]
-    fn identity_string() {
-        let input = "foobar baz quux {{something}}";
-        let template = Template::parse(&input).unwrap();
+    fn empty_template() {
+        let input = "";
+        Template::parse(&input, Default::default()).unwrap_err(); // TODO assert this error
+
+        let template = Template::parse(&input, Opts::default().empty_template().build()).unwrap();
         assert!(template.is_empty());
-        let parts = Args::new().build();
-        assert_eq!(input, template.apply(&parts).unwrap());
+        assert_eq!(input, template.apply(&Args::new().build()).unwrap());
+
+        let input = "foobar baz quux {{something}}";
+        Template::parse(&input, Default::default()).unwrap_err(); // TODO assert this error
+
+        let template = Template::parse(&input, Opts::default().empty_template().build()).unwrap();
+        assert!(template.is_empty());
+        assert_eq!(input, template.apply(&Args::new().build()).unwrap());
     }
 
     #[test]
-    fn find_keys() {
-        let input = "${test} ${foo} ${bar}";
-        let list =
-            Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
-                .unwrap();
-        assert_eq!(list, vec!["test", "foo", "bar"]);
+    fn duplicate_keys() {
+        let input = "${one} and ${two} and ${one}";
+        Template::parse(&input, Default::default()).unwrap_err(); //TODO assert this error
 
-        let input = "${a} ${b} ${b}";
-        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
-            .unwrap_err();
-        assert_eq!(err, KeyError::DuplicateKey("b", 10..=13));
+        let input = "${one} and ${two} and ${one}";
+        let template = Template::parse(&input, Opts::default().duplicate_keys().build()).unwrap();
+        let parts = Args::new().with("one", &1).with("two", &2).build();
+        assert_eq!("1 and 2 and 1", template.apply(&parts).unwrap());
+    }
 
-        let input = "${a} ${} ${b}";
-        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
-            .unwrap_err();
-        assert_eq!(err, KeyError::EmptyTemplate(5..=7));
+    #[test]
+    fn optional_keys() {
+        let input = "${foo} ${bar} ${baz}";
 
-        let input = "${a} ${${asdf}}";
-        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
-            .unwrap_err();
-        assert_eq!(
-            err,
-            KeyError::NotSupported("nested templates", 5..=input.len())
-        );
+        let parts = Args::new()
+            .with("foo", &false)
+            .with("unknown", &true)
+            .build();
 
-        let input = "${good} ${_bad}";
-        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
-            .unwrap_err();
-        assert_eq!(err, KeyError::InvalidKeyStart("_bad", 8..=14));
+        let template = Template::parse(&input, Default::default()).unwrap();
+        template.apply(&parts).unwrap_err(); // TODO assert this error
 
-        let input = "${good} ${b_ad}";
-        let err = Template::find_keys(&input, char::is_ascii_alphabetic, char::is_ascii_alphabetic)
-            .unwrap_err();
-        assert_eq!(err, KeyError::InvalidKey("b_ad", 8..=14));
+        let template = Template::parse(&input, Opts::default().optional_keys().build()).unwrap();
+        assert_eq!("false ${bar} ${baz}", template.apply(&parts).unwrap());
     }
 }
