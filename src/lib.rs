@@ -180,9 +180,9 @@ impl<'a> Template<'a> {
         V: std::fmt::Display + 'repr,
     {
         // if we have an empty template, ignore formatting
-        if self.is_empty() {
-            return Ok(self.data);
-        }
+        // if self.is_empty() {
+        //     return Ok(self.data);
+        // }
 
         let parts = parts.into_iter().map(|(k, v)| (k, v.to_string()));
         for (key, val) in parts {
@@ -192,7 +192,7 @@ impl<'a> Template<'a> {
                     let s = self.data.replace(&format!("${{{}}}", match_), &val);
                     std::mem::replace(&mut self.data, s);
                 }
-                None if self.opts.optional_keys => continue,
+                None if self.opts.optional_keys || self.is_empty() => continue,
                 _ => return Err(Error::OptionalKeys),
             }
         }
@@ -533,5 +533,13 @@ mod tests {
 
         let template = Template::parse(&input, Opts::default().optional_keys().build()).unwrap();
         assert_eq!("false ${bar} ${baz}", template.apply(&parts).unwrap());
+    }
+
+    #[test]
+    fn empty_template_replace() {
+        let template =
+            Template::parse("${short_name}", Opts::default().empty_template().build()).unwrap();
+        let parts = Args::new().with("short_name", &1).build();
+        assert_eq!("1", template.apply(&parts).unwrap());
     }
 }
