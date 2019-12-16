@@ -179,11 +179,6 @@ impl<'a> Template<'a> {
         I: IntoIterator<Item = &'repr (&'repr str, V)> + 'repr,
         V: std::fmt::Display + 'repr,
     {
-        // if we have an empty template, ignore formatting
-        // if self.is_empty() {
-        //     return Ok(self.data);
-        // }
-
         let parts = parts.into_iter().map(|(k, v)| (k, v.to_string()));
         for (key, val) in parts {
             let matches = self.state.remove(key); // is this the infinite loop?
