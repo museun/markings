@@ -1,3 +1,7 @@
+//! A simple string-based template 'language'
+//!
+//! This simply allows you to replace ${key} in a string with a 'Val' that imls. `std::fmt::Display`
+//!
 //! # Simple usage
 //! ```
 //! use markings::{Args, Template, Opts};

@@ -2,6 +2,10 @@
 
 [![Cargo](https://img.shields.io/crates/v/markings.svg)](https://crates.io/crates/markings) [![Docs.rs](https://docs.rs/markings/badge.svg)](https://docs.rs/markings) [![Github Actions](https://github.com/museun/markings/workflows/Rust/badge.svg)](https://github.com/museun/markings) 
 
+A simple string-based template 'language'
+
+This simply allows you to replace ${key} in a string with a 'Val' that imls. `std::fmt::Display`
+
 ## Simple usage
 ```rust
 use markings::{Args, Template, Opts};

@@ -1,6 +1,6 @@
 [package]
 name = "markings"
-version = "0.3.2"
+version = "0.3.3"
 
 authors = ["museun <museun@outlook.com>"]
 description = "a very simple string (template) replacement crate"
