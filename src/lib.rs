@@ -80,6 +80,7 @@ impl std::fmt::Display for Error {
         }
     }
 }
+impl std::error::Error for Error {}
 
 #[derive(Debug, Clone)]
 struct State<'a> {
