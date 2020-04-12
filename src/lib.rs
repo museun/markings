@@ -552,5 +552,11 @@ mod tests {
         let template = Template::parse("${foo} ${bar}", Default::default()).unwrap();
         let s = template.apply(&args).unwrap();
         assert_eq!(s, "42 false");
+
+        let key = "foo".to_string();
+        let args: Args = Args::new().with(&key, &42).with("bar", false);
+        let template = Template::parse("${foo} ${bar}", Default::default()).unwrap();
+        let s = template.apply(&args).unwrap();
+        assert_eq!(s, "42 false");
     }
 }
