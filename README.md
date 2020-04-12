@@ -4,7 +4,7 @@
 
 A simple string-based template 'language'
 
-This simply allows you to replace ${key} in a string with a 'Val' that imls. `std::fmt::Display`
+This simply allows you to replace ${key} in a string with a 'Val' that impls. `std::fmt::Display`
 
 ## Simple usage
 ```rust
@@ -23,8 +23,7 @@ let args = Args::new()
      // key must be a &str,
      // value is anything that implements std::fmt::Display
     .with("name", &"test-user")
-    .with("greeting", &false)
-    .build(); // construct the args
+    .with("greeting", &false);    
 
 // apply the pre-computed args to the template, consuming the template
 let output = template.apply(&args).unwrap();

@@ -19,8 +19,7 @@
 //!      // key must be a &str,
 //!      // value is anything that implements std::fmt::Display
 //!     .with("name", &"test-user")
-//!     .with("greeting", &false)
-//!     .build(); // construct the args
+//!     .with("greeting", &false);
 //!
 //! // apply the pre-computed args to the template, consuming the template
 //! let output = template.apply(&args).unwrap();
@@ -133,8 +132,7 @@ impl<'a> State<'a> {
 /// // build re-usable args that act as the replacements for the keys in the template
 /// let args = Args::new()
 ///     .with("world", &"world")
-///     .with("end", &(0x21 as char))
-///     .build();
+///     .with("end", &(0x21 as char));
 ///
 /// // apply the args to the template, consuming the template
 /// let template = template
@@ -178,15 +176,9 @@ impl<'a> Template<'a> {
     /// Apply the arguments to the template
     ///
     /// One can use the [`Args`](./struct.Args.html) builder to make this less tedious
-    pub fn apply<'repr, I, V>(mut self, parts: I) -> Result<String, Error>
-    where
-        // NOTE: these lifetimes could be more coarse
-        I: IntoIterator<Item = &'repr (&'repr str, V)> + 'repr,
-        V: std::fmt::Display + 'repr,
-    {
-        let parts = parts.into_iter().map(|(k, v)| (k, v.to_string()));
-        for (key, val) in parts {
-            let matches = self.state.remove(key); // is this the infinite loop?
+    pub fn apply<'k>(mut self, args: &Args<'k>) -> Result<String, Error> {
+        for (key, val) in &args.mapping {
+            let matches = self.state.remove(key);
             match matches {
                 Some((match_, _)) => {
                     let s = self.data.replace(&format!("${{{}}}", match_), &val);
@@ -350,29 +342,69 @@ impl Opts {
 ///     .with("key1", &false)
 ///     .with("key2", &"message")
 ///     .with("key3", &41)
-///     .with("key3", &42)
-///     .build();
+///     .with("key3", &42);
 /// # assert_eq!(args.len(), 3)
 /// ```
-pub struct Args<'a>(HashMap<&'a str, &'a dyn std::fmt::Display>);
+#[derive(Default, Clone)]
+pub struct Args<'k> {
+    mapping: HashMap<std::borrow::Cow<'k, str>, String>,
+}
 
-impl<'a> Args<'a> {
+impl<'k> Args<'k> {
     /// Create a new Args builder
-    // default will be confusing because apply requires a dyn trait
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self {
+            mapping: HashMap::new(),
+        }
+    }
+
+    /// Length of the args
+    pub fn len(&self) -> usize {
+        self.mapping.len()
+    }
+
+    /// Whether the args is empty
+    pub fn is_empty(&self) -> bool {
+        self.mapping.is_empty()
     }
 
     /// Maps a key to a type that implements [`std::fmt::Display`](https://doc.rust-lang.org/std/fmt/trait.Display.html)
-    pub fn with(mut self, key: &'a str, val: &'a dyn std::fmt::Display) -> Self {
-        self.0.insert(key, val);
+    pub fn with(
+        mut self,
+        key: impl Into<std::borrow::Cow<'k, str>>,
+        val: impl std::fmt::Display,
+    ) -> Self {
+        self.mapping.insert(key.into(), val.to_string().into());
         self
     }
 
-    /// Completes the builder, returning a Vec of Key : Values
-    pub fn build(self) -> Vec<(&'a str, &'a dyn std::fmt::Display)> {
-        self.0.into_iter().collect()
+    pub fn iter(&self) -> impl Iterator<Item = (&'_ std::borrow::Cow<'k, str>, &'_ String)> + '_ {
+        self.mapping.iter()
+    }
+}
+
+pub type ArgsIntoIter<'k> = std::collections::hash_map::IntoIter<std::borrow::Cow<'k, str>, String>;
+
+impl<'k> IntoIterator for Args<'k> {
+    type Item = (std::borrow::Cow<'k, str>, String);
+    type IntoIter = ArgsIntoIter<'k>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.mapping.into_iter()
+    }
+}
+
+impl<'k, K, V> std::iter::FromIterator<(K, V)> for Args<'k>
+where
+    K: Into<std::borrow::Cow<'k, str>>,
+    V: std::fmt::Display,
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        Self {
+            mapping: iter
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.to_string()))
+                .collect(),
+        }
     }
 }
 
@@ -385,14 +417,13 @@ mod tests {
         let args = Args::new()
             .with("a", &true)
             .with("a", &false)
-            .with("a", &true)
-            .build();
+            .with("a", &true);
 
         let v = args
             .into_iter()
             .map(|(k, v)| (k, v.to_string()))
             .collect::<Vec<_>>();
-        assert_eq!(v, vec![("a", "true".to_string())]);
+        assert_eq!(v, vec![("a".into(), "true".to_string())]);
     }
 
     #[test]
@@ -407,7 +438,8 @@ mod tests {
     #[test]
     fn basic() {
         let p = Template::parse("${a} ${b}${c}", Default::default()).unwrap();
-        let t = p.apply(&[("a", &0), ("b", &1), ("c", &2)]).unwrap();
+        let a = Args::new().with("a", &0).with("b", &1).with("c", &2);
+        let t = p.apply(&a).unwrap();
         assert_eq!(t, "0 12");
     }
 
@@ -420,12 +452,8 @@ mod tests {
 
         for c in b'a'..=b'z' {
             let t = Template::parse(&base, Default::default()).unwrap();
-            base = t
-                .apply(&[(
-                    format!("{}", c as char).as_ref(),
-                    format!("{} = {}", c as char, c),
-                )])
-                .unwrap();
+            let a = Args::new().with(format!("{}", c as char), format!("{} = {}", c as char, c));
+            base = t.apply(&a).unwrap();
         }
 
         let expected = "a = 97 b = 98 c = 99 d = 100 e = 101 \
@@ -439,30 +467,9 @@ mod tests {
     }
 
     #[test]
-    fn real_template() {
-        let template = "you've reached a max of ${max} credits, \
-                        out of ${total} total credits with ${success} \
-                        successes and ${failure} failures. and I've \
-                        'collected' ${overall_total} credits from all of \
-                        the failures.";
-
-        let t = Template::parse(&template, Default::default()).unwrap();
-        let out = t
-            .apply(&[
-                ("max", &"218,731"),
-                ("total", &"706,917"),
-                ("success", &"169"),
-                ("failure", &"174"),
-                ("overall_total", &"1,629,011"),
-            ])
-            .unwrap();
-
-        let expected = "you've reached a max of 218,731 credits, \
-                        out of 706,917 total credits with 169 \
-                        successes and 174 failures. and I've \
-                        'collected' 1,629,011 credits from all of \
-                        the failures.";
-        assert_eq!(out, expected);
+    fn owned_key() {
+        let args: Args<'static> = Args::new().with("foo".to_string(), 42);
+        assert_eq!(args.len(), 1);
     }
 
     #[test]
@@ -479,8 +486,7 @@ mod tests {
             .with("total", &"706,917")
             .with("success", &"169")
             .with("failure", &"174")
-            .with("overall_total", &"1,629,011")
-            .build();
+            .with("overall_total", &"1,629,011");
 
         let expected = "you've reached a max of 218,731 credits, \
                         out of 706,917 total credits with 169 \
@@ -498,14 +504,14 @@ mod tests {
 
         let template = Template::parse(&input, Opts::default().empty_template().build()).unwrap();
         assert!(template.is_empty());
-        assert_eq!(input, template.apply(&Args::new().build()).unwrap());
+        assert_eq!(input, template.apply(&Args::new()).unwrap());
 
         let input = "foobar baz quux {{something}}";
         Template::parse(&input, Default::default()).unwrap_err(); // TODO assert this error
 
         let template = Template::parse(&input, Opts::default().empty_template().build()).unwrap();
         assert!(template.is_empty());
-        assert_eq!(input, template.apply(&Args::new().build()).unwrap());
+        assert_eq!(input, template.apply(&Args::new()).unwrap());
     }
 
     #[test]
@@ -515,7 +521,7 @@ mod tests {
 
         let input = "${one} and ${two} and ${one}";
         let template = Template::parse(&input, Opts::default().duplicate_keys().build()).unwrap();
-        let parts = Args::new().with("one", &1).with("two", &2).build();
+        let parts = Args::new().with("one", &1).with("two", &2);
         assert_eq!("1 and 2 and 1", template.apply(&parts).unwrap());
     }
 
@@ -523,10 +529,7 @@ mod tests {
     fn optional_keys() {
         let input = "${foo} ${bar} ${baz}";
 
-        let parts = Args::new()
-            .with("foo", &false)
-            .with("unknown", &true)
-            .build();
+        let parts = Args::new().with("foo", &false).with("unknown", &true);
 
         let template = Template::parse(&input, Default::default()).unwrap();
         template.apply(&parts).unwrap_err(); // TODO assert this error
@@ -539,7 +542,21 @@ mod tests {
     fn empty_template_replace() {
         let template =
             Template::parse("${short_name}", Opts::default().empty_template().build()).unwrap();
-        let parts = Args::new().with("short_name", &1).build();
+        let parts = Args::new().with("short_name", &1);
         assert_eq!("1", template.apply(&parts).unwrap());
+    }
+
+    #[test]
+    fn args_owned() {
+        let args = Args::new().with("foo", 42).with("bar", false);
+        let template = Template::parse("${foo} ${bar}", Default::default()).unwrap();
+        let s = template.apply(&args).unwrap();
+        assert_eq!(s, "42 false");
+
+        let key = "foo".to_string();
+        let args: Args = Args::new().with(&key, &42).with("bar", false);
+        let template = Template::parse("${foo} ${bar}", Default::default()).unwrap();
+        let s = template.apply(&args).unwrap();
+        assert_eq!(s, "42 false");
     }
 }
